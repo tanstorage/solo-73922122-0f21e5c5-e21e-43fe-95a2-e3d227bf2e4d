@@ -1,0 +1,46 @@
+name: qc-replica
+
+services:
+  db:
+    image: postgres:16
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=8
+      - -c
+      - max_wal_senders=8
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: appdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d appdb"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  collector:
+    build: ./collector
+    environment:
+      PG_DSN: postgresql://postgres:postgres@db:5432/appdb
+      SQLITE_PATH: /data/replica.db
+      SLOT_NAME: collector_slot
+      # 演示用人为延迟：放慢全量拷贝，便于在“全量进行中”注入源端变更。生产置 "0"。
+      SNAPSHOT_ROW_DELAY_MS: "20"
+      RECONNECT_DELAY_S: "2"
+    volumes:
+      - replica-data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  replica-data:
